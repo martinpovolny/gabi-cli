@@ -28,6 +28,7 @@ import (
 	"github.com/elk-language/go-prompt"
 	istrings "github.com/elk-language/go-prompt/strings"
 	"github.com/jedib0t/go-pretty/v6/table"
+	"github.com/jedib0t/go-pretty/v6/text"
 )
 
 func main() {
@@ -40,6 +41,7 @@ func main() {
 	}
 	showHelp := flag.Bool("h", false, "Shows help")
 	quiet := flag.Bool("q", false, "Suppress logging messages")
+	fancy := flag.Bool("fancy", false, "Use rounded table style with colored header")
 	namespace := flag.String("n", "", "Namespace (defaults to current context)")
 	flag.Parse()
 
@@ -85,7 +87,7 @@ func main() {
 	var query string
 	if len(flag.Args()) > 0 {
 		query = strings.Join(flag.Args(), " ")
-		runQuery(gabiUrl, bearerToken, "", &query, qh)
+		runQuery(gabiUrl, bearerToken, "", &query, qh, *fancy)
 		return
 	}
 
@@ -138,10 +140,10 @@ func main() {
 				return
 			}
 			query = ""
-			runQuery(gabiUrl, bearerToken, edited, &query, qh)
+			runQuery(gabiUrl, bearerToken, edited, &query, qh, *fancy)
 			return
 		}
-		runQuery(gabiUrl, bearerToken, input, &query, qh)
+		runQuery(gabiUrl, bearerToken, input, &query, qh, *fancy)
 	}, opts...)
 	p.Run()
 }
@@ -246,7 +248,7 @@ func openEditor(content string) (string, error) {
 	return strings.TrimRight(string(result), "\n"), nil
 }
 
-func runQuery(gabiUrl, bearerToken, input string, query *string, qh *QueryHistory) {
+func runQuery(gabiUrl, bearerToken, input string, query *string, qh *QueryHistory, fancy bool) {
 	*query = fmt.Sprintf("%s%s", *query, input)
 	if !strings.HasSuffix(*query, ";") {
 		*query = fmt.Sprintf("%s\n", *query)
@@ -262,7 +264,7 @@ func runQuery(gabiUrl, bearerToken, input string, query *string, qh *QueryHistor
 	} else if result.Error != "" {
 		fmt.Fprintf(os.Stderr, "Error: %s\n", result.Error)
 	} else {
-		formatResult(result, os.Stdout)
+		formatResult(result, os.Stdout, fancy)
 	}
 	*query = ""
 }
@@ -350,7 +352,7 @@ func queryGabi(url, query, token string) (models.QueryResponse, error) {
 	return result, err
 }
 
-func formatResult(r models.QueryResponse, out io.Writer) {
+func formatResult(r models.QueryResponse, out io.Writer, fancy bool) {
 	t := table.NewWriter()
 	t.SetOutputMirror(out)
 	if len(r.Result) > 0 {
@@ -361,7 +363,12 @@ func formatResult(r models.QueryResponse, out io.Writer) {
 			t.AppendRow(convertToRow(row))
 		}
 	}
-	t.Style().Options.DrawBorder = false
+	if fancy {
+		t.SetStyle(table.StyleRounded)
+		t.Style().Color.Header = text.Colors{text.Bold, text.FgCyan}
+	} else {
+		t.Style().Options.DrawBorder = false
+	}
 	t.Render()
 }
 
