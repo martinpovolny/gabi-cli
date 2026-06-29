@@ -11,6 +11,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -25,6 +26,7 @@ import (
 	routeclientv1 "github.com/openshift/client-go/route/clientset/versioned/typed/route/v1"
 
 	"github.com/elk-language/go-prompt"
+	istrings "github.com/elk-language/go-prompt/strings"
 	"github.com/jedib0t/go-pretty/v6/table"
 )
 
@@ -79,11 +81,79 @@ func main() {
 		return
 	}
 	p := prompt.New(func(input string) {
+		if strings.TrimSpace(input) == `\e` {
+			edited, err := openEditor(query)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Editor error: %s\n", err)
+				return
+			}
+			query = ""
+			runQuery(gabiUrl, bearerToken, edited, &query)
+			return
+		}
 		runQuery(gabiUrl, bearerToken, input, &query)
 	},
 		prompt.WithPrefix("gabi> "),
+		prompt.WithKeyBind(prompt.KeyBind{
+			Key: prompt.ControlO,
+			Fn: func(p *prompt.Prompt) bool {
+				buf := p.Buffer()
+				currentText := buf.Text()
+				edited, err := openEditor(currentText)
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "Editor error: %s\n", err)
+					return true
+				}
+				runeLen := istrings.RuneCountInString(currentText)
+				if runeLen > 0 {
+					p.DeleteBeforeCursorRunes(runeLen)
+				}
+				p.InsertTextMoveCursor(edited, false)
+				return true
+			},
+		}),
 	)
 	p.Run()
+}
+
+func getEditor() string {
+	if e := os.Getenv("VISUAL"); e != "" {
+		return e
+	}
+	if e := os.Getenv("EDITOR"); e != "" {
+		return e
+	}
+	return "vi"
+}
+
+func openEditor(content string) (string, error) {
+	f, err := os.CreateTemp("", "gabi-*.sql")
+	if err != nil {
+		return "", err
+	}
+	tmpPath := f.Name()
+	defer os.Remove(tmpPath)
+
+	if _, err := f.WriteString(content); err != nil {
+		f.Close()
+		return "", err
+	}
+	f.Close()
+
+	editor := getEditor()
+	cmd := exec.Command(editor, tmpPath)
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		return "", fmt.Errorf("editor %s exited with: %w", editor, err)
+	}
+
+	result, err := os.ReadFile(tmpPath)
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimRight(string(result), "\n"), nil
 }
 
 func runQuery(gabiUrl, bearerToken, input string, query *string) {
