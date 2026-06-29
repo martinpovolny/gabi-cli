@@ -73,21 +73,25 @@ func main() {
 	gabiUrl := gabiUrlFromRoute(gabiRoute)
 	log.Printf("Using Gabi %s", gabiUrl)
 
-	var query string
-	var lastQuery string
-	if len(flag.Args()) > 0 {
-		query = strings.Join(flag.Args(), " ")
-		runQuery(gabiUrl, bearerToken, "", &query, &lastQuery)
-		return
-	}
-
 	historyFile := ""
 	if home := homedir.HomeDir(); home != "" {
 		historyFile = filepath.Join(home, ".gabi_history")
 	}
-	var historyOpts []prompt.Option
+	var qh *QueryHistory
 	if historyFile != "" {
-		historyOpts = append(historyOpts, prompt.WithCustomHistory(NewFileHistory(historyFile)))
+		qh = NewQueryHistory(historyFile)
+	}
+
+	var query string
+	if len(flag.Args()) > 0 {
+		query = strings.Join(flag.Args(), " ")
+		runQuery(gabiUrl, bearerToken, "", &query, qh)
+		return
+	}
+
+	var historyOpts []prompt.Option
+	if qh != nil {
+		historyOpts = append(historyOpts, prompt.WithCustomHistory(qh))
 	}
 
 	opts := append([]prompt.Option{
@@ -98,8 +102,8 @@ func main() {
 				buf := p.Buffer()
 				currentText := buf.Text()
 				initial := currentText
-				if initial == "" {
-					initial = lastQuery
+				if initial == "" && qh != nil {
+					initial = qh.LastQuery()
 				}
 				edited, err := openEditor(initial)
 				if err != nil {
@@ -118,48 +122,67 @@ func main() {
 
 	p := prompt.New(func(input string) {
 		if strings.TrimSpace(input) == `\e` {
+			lastQuery := ""
+			if qh != nil {
+				lastQuery = qh.LastQuery()
+			}
 			edited, err := openEditor(lastQuery)
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "Editor error: %s\n", err)
 				return
 			}
 			query = ""
-			runQuery(gabiUrl, bearerToken, edited, &query, &lastQuery)
+			runQuery(gabiUrl, bearerToken, edited, &query, qh)
 			return
 		}
-		runQuery(gabiUrl, bearerToken, input, &query, &lastQuery)
+		runQuery(gabiUrl, bearerToken, input, &query, qh)
 	}, opts...)
 	p.Run()
 }
 
-type FileHistory struct {
+const queryDelimiter = "\n\n"
+
+type QueryHistory struct {
 	prompt.History
-	path string
+	path    string
+	queries []string
 }
 
-func NewFileHistory(path string) *FileHistory {
-	fh := &FileHistory{
+func NewQueryHistory(path string) *QueryHistory {
+	qh := &QueryHistory{
 		History: *prompt.NewHistory(),
 		path:    path,
 	}
 	if data, err := os.ReadFile(path); err == nil {
-		for _, line := range strings.Split(string(data), "\n") {
-			if line != "" {
-				fh.History.Add(line)
+		content := strings.TrimRight(string(data), "\n")
+		if content != "" {
+			for _, q := range strings.Split(content, queryDelimiter) {
+				q = strings.TrimSpace(q)
+				if q != "" {
+					qh.queries = append(qh.queries, q)
+					qh.History.Add(q)
+				}
 			}
 		}
 	}
-	return fh
+	return qh
 }
 
-func (fh *FileHistory) Add(input string) {
-	fh.History.Add(input)
-	fh.save()
+func (qh *QueryHistory) AddQuery(q string) {
+	qh.queries = append(qh.queries, q)
+	qh.History.Add(q)
+	qh.save()
 }
 
-func (fh *FileHistory) save() {
-	entries := fh.History.Entries()
-	os.WriteFile(fh.path, []byte(strings.Join(entries, "\n")+"\n"), 0600)
+func (qh *QueryHistory) save() {
+	os.WriteFile(qh.path, []byte(strings.Join(qh.queries, queryDelimiter)+"\n"), 0600)
+}
+
+func (qh *QueryHistory) LastQuery() string {
+	if len(qh.queries) > 0 {
+		return qh.queries[len(qh.queries)-1]
+	}
+	return ""
 }
 
 func getEditor() string {
@@ -202,14 +225,16 @@ func openEditor(content string) (string, error) {
 	return strings.TrimRight(string(result), "\n"), nil
 }
 
-func runQuery(gabiUrl, bearerToken, input string, query, lastQuery *string) {
+func runQuery(gabiUrl, bearerToken, input string, query *string, qh *QueryHistory) {
 	*query = fmt.Sprintf("%s%s", *query, input)
 	if !strings.HasSuffix(*query, ";") {
 		*query = fmt.Sprintf("%s\n", *query)
 		return
 	}
 	*query = strings.TrimSpace(*query)
-	*lastQuery = *query
+	if qh != nil {
+		qh.AddQuery(*query)
+	}
 	result, err := queryGabi(gabiUrl, *query, bearerToken)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %s\n", err)
