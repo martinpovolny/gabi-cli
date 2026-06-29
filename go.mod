@@ -1,18 +1,16 @@
 module github.com/vkrizan/gabi-cli
 
-go 1.18
+go 1.24
 
 require (
 	github.com/app-sre/gabi v0.0.0-20230208120407-b3a08a69e7f6
-	github.com/c-bata/go-prompt v0.2.5 // v0.2.6 has a bug https://github.com/c-bata/go-prompt/issues/228
+	github.com/elk-language/go-prompt v1.4.0
 	github.com/jedib0t/go-pretty/v6 v6.4.4
 	github.com/openshift/api v0.0.0-20230201213816-61d971884921
 	github.com/openshift/client-go v0.0.0-20230120202327-72f107311084
 	k8s.io/apimachinery v0.26.1
 	k8s.io/client-go v0.26.1
 )
-
-replace github.com/c-bata/go-prompt v0.2.5 => github.com/vkrizan/go-prompt v0.0.0-20240906141356-a25eb3f085fe
 
 require (
 	github.com/davecgh/go-spew v1.1.1 // indirect
@@ -24,25 +22,26 @@ require (
 	github.com/gogo/protobuf v1.3.2 // indirect
 	github.com/golang/protobuf v1.5.2 // indirect
 	github.com/google/gnostic v0.5.7-v3refs // indirect
-	github.com/google/go-cmp v0.5.9 // indirect
+	github.com/google/go-cmp v0.6.0 // indirect
 	github.com/google/gofuzz v1.2.0 // indirect
 	github.com/imdario/mergo v0.3.7 // indirect
 	github.com/josharian/intern v1.0.0 // indirect
 	github.com/json-iterator/go v1.1.12 // indirect
 	github.com/mailru/easyjson v0.7.6 // indirect
-	github.com/mattn/go-colorable v0.1.7 // indirect
-	github.com/mattn/go-isatty v0.0.17 // indirect
-	github.com/mattn/go-runewidth v0.0.14 // indirect
-	github.com/mattn/go-tty v0.0.3 // indirect
+	github.com/mattn/go-colorable v0.1.14 // indirect
+	github.com/mattn/go-isatty v0.0.20 // indirect
+	github.com/mattn/go-runewidth v0.0.16 // indirect
+	github.com/mattn/go-tty v0.0.7 // indirect
 	github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd // indirect
 	github.com/modern-go/reflect2 v1.0.2 // indirect
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
 	github.com/pkg/term v1.2.0-beta.2 // indirect
-	github.com/rivo/uniseg v0.2.0 // indirect
+	github.com/rivo/uniseg v0.4.7 // indirect
 	github.com/spf13/pflag v1.0.5 // indirect
+	golang.org/x/exp v0.0.0-20250305212735-054e65f0b394 // indirect
 	golang.org/x/net v0.5.0 // indirect
 	golang.org/x/oauth2 v0.0.0-20220411215720-9780585627b5 // indirect
-	golang.org/x/sys v0.4.0 // indirect
+	golang.org/x/sys v0.33.0 // indirect
 	golang.org/x/term v0.4.0 // indirect
 	golang.org/x/text v0.6.0 // indirect
 	golang.org/x/time v0.0.0-20220210224613-90d013bbcef8 // indirect
