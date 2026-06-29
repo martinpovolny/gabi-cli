@@ -106,6 +106,9 @@ func main() {
 					initial = qh.LastQuery()
 				}
 				edited, err := openEditor(initial)
+				if err == errEditorNoSave {
+					return true
+				}
 				if err != nil {
 					fmt.Fprintf(os.Stderr, "Editor error: %s\n", err)
 					return true
@@ -127,6 +130,9 @@ func main() {
 				lastQuery = qh.LastQuery()
 			}
 			edited, err := openEditor(lastQuery)
+			if err == errEditorNoSave {
+				return
+			}
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "Editor error: %s\n", err)
 				return
@@ -195,6 +201,8 @@ func getEditor() string {
 	return "vi"
 }
 
+var errEditorNoSave = fmt.Errorf("editor exited without saving")
+
 func openEditor(content string) (string, error) {
 	f, err := os.CreateTemp("", "gabi-*.sql")
 	if err != nil {
@@ -209,6 +217,11 @@ func openEditor(content string) (string, error) {
 	}
 	f.Close()
 
+	statBefore, err := os.Stat(tmpPath)
+	if err != nil {
+		return "", err
+	}
+
 	editor := getEditor()
 	cmd := exec.Command(editor, tmpPath)
 	cmd.Stdin = os.Stdin
@@ -216,6 +229,14 @@ func openEditor(content string) (string, error) {
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
 		return "", fmt.Errorf("editor %s exited with: %w", editor, err)
+	}
+
+	statAfter, err := os.Stat(tmpPath)
+	if err != nil {
+		return "", err
+	}
+	if statAfter.ModTime().Equal(statBefore.ModTime()) {
+		return "", errEditorNoSave
 	}
 
 	result, err := os.ReadFile(tmpPath)
