@@ -74,32 +74,34 @@ func main() {
 	log.Printf("Using Gabi %s", gabiUrl)
 
 	var query string
+	var lastQuery string
 	if len(flag.Args()) > 0 {
-		// if there's a query on commandline, just run it
 		query = strings.Join(flag.Args(), " ")
-		runQuery(gabiUrl, bearerToken, "", &query)
+		runQuery(gabiUrl, bearerToken, "", &query, &lastQuery)
 		return
 	}
-	p := prompt.New(func(input string) {
-		if strings.TrimSpace(input) == `\e` {
-			edited, err := openEditor(query)
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "Editor error: %s\n", err)
-				return
-			}
-			query = ""
-			runQuery(gabiUrl, bearerToken, edited, &query)
-			return
-		}
-		runQuery(gabiUrl, bearerToken, input, &query)
-	},
+
+	historyFile := ""
+	if home := homedir.HomeDir(); home != "" {
+		historyFile = filepath.Join(home, ".gabi_history")
+	}
+	var historyOpts []prompt.Option
+	if historyFile != "" {
+		historyOpts = append(historyOpts, prompt.WithCustomHistory(NewFileHistory(historyFile)))
+	}
+
+	opts := append([]prompt.Option{
 		prompt.WithPrefix("gabi> "),
 		prompt.WithKeyBind(prompt.KeyBind{
 			Key: prompt.ControlO,
 			Fn: func(p *prompt.Prompt) bool {
 				buf := p.Buffer()
 				currentText := buf.Text()
-				edited, err := openEditor(currentText)
+				initial := currentText
+				if initial == "" {
+					initial = lastQuery
+				}
+				edited, err := openEditor(initial)
 				if err != nil {
 					fmt.Fprintf(os.Stderr, "Editor error: %s\n", err)
 					return true
@@ -112,8 +114,52 @@ func main() {
 				return true
 			},
 		}),
-	)
+	}, historyOpts...)
+
+	p := prompt.New(func(input string) {
+		if strings.TrimSpace(input) == `\e` {
+			edited, err := openEditor(lastQuery)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Editor error: %s\n", err)
+				return
+			}
+			query = ""
+			runQuery(gabiUrl, bearerToken, edited, &query, &lastQuery)
+			return
+		}
+		runQuery(gabiUrl, bearerToken, input, &query, &lastQuery)
+	}, opts...)
 	p.Run()
+}
+
+type FileHistory struct {
+	prompt.History
+	path string
+}
+
+func NewFileHistory(path string) *FileHistory {
+	fh := &FileHistory{
+		History: *prompt.NewHistory(),
+		path:    path,
+	}
+	if data, err := os.ReadFile(path); err == nil {
+		for _, line := range strings.Split(string(data), "\n") {
+			if line != "" {
+				fh.History.Add(line)
+			}
+		}
+	}
+	return fh
+}
+
+func (fh *FileHistory) Add(input string) {
+	fh.History.Add(input)
+	fh.save()
+}
+
+func (fh *FileHistory) save() {
+	entries := fh.History.Entries()
+	os.WriteFile(fh.path, []byte(strings.Join(entries, "\n")+"\n"), 0600)
 }
 
 func getEditor() string {
@@ -156,13 +202,14 @@ func openEditor(content string) (string, error) {
 	return strings.TrimRight(string(result), "\n"), nil
 }
 
-func runQuery(gabiUrl, bearerToken, input string, query *string) {
+func runQuery(gabiUrl, bearerToken, input string, query, lastQuery *string) {
 	*query = fmt.Sprintf("%s%s", *query, input)
 	if !strings.HasSuffix(*query, ";") {
 		*query = fmt.Sprintf("%s\n", *query)
 		return
 	}
 	*query = strings.TrimSpace(*query)
+	*lastQuery = *query
 	result, err := queryGabi(gabiUrl, *query, bearerToken)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %s\n", err)
