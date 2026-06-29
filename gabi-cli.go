@@ -24,7 +24,7 @@ import (
 	routev1 "github.com/openshift/api/route/v1"
 	routeclientv1 "github.com/openshift/client-go/route/clientset/versioned/typed/route/v1"
 
-	"github.com/c-bata/go-prompt"
+	"github.com/elk-language/go-prompt"
 	"github.com/jedib0t/go-pretty/v6/table"
 )
 
@@ -80,7 +80,9 @@ func main() {
 	}
 	p := prompt.New(func(input string) {
 		runQuery(gabiUrl, bearerToken, input, &query)
-	}, completer)
+	},
+		prompt.WithPrefix("gabi> "),
+	)
 	p.Run()
 }
 
@@ -100,10 +102,6 @@ func runQuery(gabiUrl, bearerToken, input string, query *string) {
 		formatResult(result, os.Stdout)
 	}
 	*query = ""
-}
-
-func completer(in prompt.Document) []prompt.Suggest {
-	return []prompt.Suggest{}
 }
 
 func setupK8s(kubeconfigPath string) (clientcmd.ClientConfig, *restclient.Config) {
