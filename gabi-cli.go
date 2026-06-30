@@ -91,7 +91,9 @@ func main() {
 	var query string
 	if len(flag.Args()) > 0 {
 		query = strings.Join(flag.Args(), " ")
-		runQuery(gabiUrl, bearerToken, "", &query, qh, *fancy, displayMode)
+		var buf bytes.Buffer
+		runQuery(gabiUrl, bearerToken, "", &query, qh, *fancy, displayMode, &buf)
+		pageOutput(buf.String())
 		return
 	}
 
@@ -145,7 +147,9 @@ func main() {
 				return
 			}
 			query = ""
-			runQuery(gabiUrl, bearerToken, edited, &query, qh, *fancy, displayMode)
+			var buf bytes.Buffer
+			runQuery(gabiUrl, bearerToken, edited, &query, qh, *fancy, displayMode, &buf)
+			pageOutput(buf.String())
 			return
 		}
 		if trimmed == `\x` {
@@ -159,23 +163,33 @@ func main() {
 			return
 		}
 		if trimmed == `\d` {
-			runBuiltinQuery(gabiUrl, bearerToken, sqlListSchema, os.Stdout, *fancy, displayMode)
+			var buf bytes.Buffer
+			runBuiltinQuery(gabiUrl, bearerToken, sqlListSchema, &buf, *fancy, displayMode)
+			pageOutput(buf.String())
 			return
 		}
 		if strings.HasPrefix(trimmed, `\d `) {
 			tableName := strings.TrimSpace(trimmed[3:])
-			describeTable(gabiUrl, bearerToken, tableName, os.Stdout, *fancy, displayMode)
+			var buf bytes.Buffer
+			describeTable(gabiUrl, bearerToken, tableName, &buf, *fancy, displayMode)
+			pageOutput(buf.String())
 			return
 		}
 		if trimmed == `\stats` || strings.HasPrefix(trimmed, `\stats `) {
-			runStats(gabiUrl, bearerToken, trimmed, os.Stdout, *fancy, displayMode)
+			var buf bytes.Buffer
+			runStats(gabiUrl, bearerToken, trimmed, &buf, *fancy, displayMode)
+			pageOutput(buf.String())
 			return
 		}
 		if trimmed == `\h` || trimmed == `\help` || trimmed == `help` {
 			printHelp()
 			return
 		}
-		runQuery(gabiUrl, bearerToken, input, &query, qh, *fancy, displayMode)
+		{
+			var buf bytes.Buffer
+			runQuery(gabiUrl, bearerToken, input, &query, qh, *fancy, displayMode, &buf)
+			pageOutput(buf.String())
+		}
 	}, opts...)
 	p.Run()
 }
@@ -399,7 +413,7 @@ func runStats(gabiUrl, bearerToken, cmd string, out io.Writer, fancy bool, displ
 	}
 }
 
-func runQuery(gabiUrl, bearerToken, input string, query *string, qh *QueryHistory, fancy bool, displayMode string) {
+func runQuery(gabiUrl, bearerToken, input string, query *string, qh *QueryHistory, fancy bool, displayMode string, out io.Writer) {
 	*query = fmt.Sprintf("%s%s", *query, input)
 	if !strings.HasSuffix(*query, ";") {
 		*query = fmt.Sprintf("%s\n", *query)
@@ -415,7 +429,7 @@ func runQuery(gabiUrl, bearerToken, input string, query *string, qh *QueryHistor
 	} else if result.Error != "" {
 		fmt.Fprintf(os.Stderr, "Error: %s\n", result.Error)
 	} else {
-		formatResult(result, os.Stdout, fancy, displayMode)
+		formatResult(result, out, fancy, displayMode)
 	}
 	*query = ""
 }
@@ -501,6 +515,37 @@ func queryGabi(url, query, token string) (models.QueryResponse, error) {
 		err = fmt.Errorf("malformed result %w", e)
 	}
 	return result, err
+}
+
+func getPager() string {
+	if p := os.Getenv("PAGER"); p != "" {
+		return p
+	}
+	return "less -R"
+}
+
+func getTerminalHeight() int {
+	_, h, err := term.GetSize(int(os.Stdin.Fd()))
+	if err != nil || h <= 0 {
+		return 24
+	}
+	return h
+}
+
+func pageOutput(content string) {
+	lines := strings.Count(content, "\n")
+	if lines < getTerminalHeight() {
+		fmt.Print(content)
+		return
+	}
+	pager := getPager()
+	cmd := exec.Command("sh", "-c", pager)
+	cmd.Stdin = strings.NewReader(content)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		fmt.Print(content)
+	}
 }
 
 func getTerminalWidth() int {
