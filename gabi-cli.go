@@ -187,7 +187,9 @@ func (qh *QueryHistory) AddQuery(q string) {
 }
 
 func (qh *QueryHistory) save() {
-	os.WriteFile(qh.path, []byte(strings.Join(qh.queries, queryDelimiter)+"\n"), 0600)
+	if err := os.WriteFile(qh.path, []byte(strings.Join(qh.queries, queryDelimiter)+"\n"), 0600); err != nil {
+		log.Printf("warning: failed to save history: %s", err)
+	}
 }
 
 func (qh *QueryHistory) LastQuery() string {
