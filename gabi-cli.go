@@ -148,7 +148,7 @@ func main() {
 	p.Run()
 }
 
-const queryDelimiter = "\n\n"
+const queryDelimiter = "\n\x00\n"
 
 type QueryHistory struct {
 	prompt.History
