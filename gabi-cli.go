@@ -402,19 +402,28 @@ func runStats(gabiUrl, bearerToken, cmd string, out io.Writer, fancy bool, displ
 	if len(fields) > 1 {
 		for _, arg := range fields[1:] {
 			found := false
-			for _, sq := range statQueries {
-				if sq.name == arg {
-					fmt.Fprintf(out, "%s:\n", sq.label)
-					runBuiltinQuery(gabiUrl, bearerToken, sq.sql, out, fancy, displayMode)
-					fmt.Fprintln(out)
-					found = true
-					break
+			n := 0
+			if _, err := fmt.Sscanf(arg, "%d", &n); err == nil && n >= 1 && n <= len(statQueries) {
+				sq := statQueries[n-1]
+				fmt.Fprintf(out, "%s:\n", sq.label)
+				runBuiltinQuery(gabiUrl, bearerToken, sq.sql, out, fancy, displayMode)
+				fmt.Fprintln(out)
+				found = true
+			} else {
+				for _, sq := range statQueries {
+					if sq.name == arg {
+						fmt.Fprintf(out, "%s:\n", sq.label)
+						runBuiltinQuery(gabiUrl, bearerToken, sq.sql, out, fancy, displayMode)
+						fmt.Fprintln(out)
+						found = true
+						break
+					}
 				}
 			}
 			if !found {
 				names := make([]string, len(statQueries))
 				for i, sq := range statQueries {
-					names[i] = sq.name
+					names[i] = fmt.Sprintf("%d=%s", i+1, sq.name)
 				}
 				fmt.Fprintf(os.Stderr, "Unknown stat: %s (available: %s)\n", arg, strings.Join(names, ", "))
 			}
