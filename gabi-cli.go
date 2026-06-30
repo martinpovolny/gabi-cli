@@ -225,7 +225,7 @@ func openEditor(content string) (string, error) {
 	}
 
 	editor := getEditor()
-	cmd := exec.Command(editor, tmpPath)
+	cmd := exec.Command("sh", "-c", editor+" \"$1\"", "--", tmpPath)
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
