@@ -171,6 +171,10 @@ func main() {
 			runStats(gabiUrl, bearerToken, trimmed, os.Stdout, *fancy, displayMode)
 			return
 		}
+		if trimmed == `\h` || trimmed == `\help` || trimmed == `help` {
+			printHelp()
+			return
+		}
 		runQuery(gabiUrl, bearerToken, input, &query, qh, *fancy, displayMode)
 	}, opts...)
 	p.Run()
@@ -280,6 +284,21 @@ func openEditor(content string) (string, error) {
 		return "", err
 	}
 	return strings.TrimRight(string(result), "\n"), nil
+}
+
+func printHelp() {
+	fmt.Print(`Available commands:
+  \d              list tables, views, and sequences
+  \d <table>      describe table (columns, indexes, references)
+  \stats          show all database statistics
+  \stats <N>      show statistic N (1=DB sizes, 2=table sizes,
+                  3=running queries, 4=index usage, 5=unused indexes)
+  \e              open last query in $EDITOR
+  \x              toggle expanded display mode
+  \h, \help       show this help
+  Ctrl+O          open current buffer (or last query) in $EDITOR
+  Ctrl+D          exit
+`)
 }
 
 const sqlListSchema = `SELECT n.nspname AS schema, c.relname AS name,
