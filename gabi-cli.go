@@ -29,6 +29,7 @@ import (
 	istrings "github.com/elk-language/go-prompt/strings"
 	"github.com/jedib0t/go-pretty/v6/table"
 	"github.com/jedib0t/go-pretty/v6/text"
+	"golang.org/x/term"
 )
 
 func main() {
@@ -42,6 +43,7 @@ func main() {
 	showHelp := flag.Bool("h", false, "Shows help")
 	quiet := flag.Bool("q", false, "Suppress logging messages")
 	fancy := flag.Bool("fancy", false, "Use rounded table style with colored header")
+	display := flag.String("display", "auto", "Display mode: auto, table, or expanded")
 	namespace := flag.String("n", "", "Namespace (defaults to current context)")
 	flag.Parse()
 
@@ -84,10 +86,12 @@ func main() {
 		qh = NewQueryHistory(historyFile)
 	}
 
+	displayMode := *display
+
 	var query string
 	if len(flag.Args()) > 0 {
 		query = strings.Join(flag.Args(), " ")
-		runQuery(gabiUrl, bearerToken, "", &query, qh, *fancy)
+		runQuery(gabiUrl, bearerToken, "", &query, qh, *fancy, displayMode)
 		return
 	}
 
@@ -126,7 +130,8 @@ func main() {
 	}, historyOpts...)
 
 	p := prompt.New(func(input string) {
-		if strings.TrimSpace(input) == `\e` {
+		trimmed := strings.TrimSpace(input)
+		if trimmed == `\e` {
 			lastQuery := ""
 			if qh != nil {
 				lastQuery = qh.LastQuery()
@@ -140,10 +145,20 @@ func main() {
 				return
 			}
 			query = ""
-			runQuery(gabiUrl, bearerToken, edited, &query, qh, *fancy)
+			runQuery(gabiUrl, bearerToken, edited, &query, qh, *fancy, displayMode)
 			return
 		}
-		runQuery(gabiUrl, bearerToken, input, &query, qh, *fancy)
+		if trimmed == `\x` {
+			if displayMode == "expanded" {
+				displayMode = "auto"
+				fmt.Println("Expanded display is off.")
+			} else {
+				displayMode = "expanded"
+				fmt.Println("Expanded display is on.")
+			}
+			return
+		}
+		runQuery(gabiUrl, bearerToken, input, &query, qh, *fancy, displayMode)
 	}, opts...)
 	p.Run()
 }
@@ -254,7 +269,7 @@ func openEditor(content string) (string, error) {
 	return strings.TrimRight(string(result), "\n"), nil
 }
 
-func runQuery(gabiUrl, bearerToken, input string, query *string, qh *QueryHistory, fancy bool) {
+func runQuery(gabiUrl, bearerToken, input string, query *string, qh *QueryHistory, fancy bool, displayMode string) {
 	*query = fmt.Sprintf("%s%s", *query, input)
 	if !strings.HasSuffix(*query, ";") {
 		*query = fmt.Sprintf("%s\n", *query)
@@ -270,7 +285,7 @@ func runQuery(gabiUrl, bearerToken, input string, query *string, qh *QueryHistor
 	} else if result.Error != "" {
 		fmt.Fprintf(os.Stderr, "Error: %s\n", result.Error)
 	} else {
-		formatResult(result, os.Stdout, fancy)
+		formatResult(result, os.Stdout, fancy, displayMode)
 	}
 	*query = ""
 }
@@ -358,13 +373,49 @@ func queryGabi(url, query, token string) (models.QueryResponse, error) {
 	return result, err
 }
 
-func formatResult(r models.QueryResponse, out io.Writer, fancy bool) {
+func getTerminalWidth() int {
+	w, _, err := term.GetSize(int(os.Stdin.Fd()))
+	if err != nil || w <= 0 {
+		return 80
+	}
+	return w
+}
+
+func formatResult(r models.QueryResponse, out io.Writer, fancy bool, displayMode string) {
+	if len(r.Result) == 0 {
+		return
+	}
+
+	if displayMode == "expanded" {
+		formatExpanded(r, out, fancy)
+		return
+	}
+
+	if displayMode == "auto" {
+		plain := renderTable(r, false)
+		termWidth := getTerminalWidth()
+		maxLineWidth := 0
+		for _, line := range strings.Split(plain, "\n") {
+			if len(line) > maxLineWidth {
+				maxLineWidth = len(line)
+			}
+		}
+		if maxLineWidth > termWidth {
+			formatExpanded(r, out, fancy)
+			return
+		}
+	}
+
+	rendered := renderTable(r, fancy)
+	fmt.Fprintln(out, rendered)
+}
+
+func renderTable(r models.QueryResponse, fancy bool) string {
 	t := table.NewWriter()
-	t.SetOutputMirror(out)
 	if len(r.Result) > 0 {
 		t.AppendHeader(convertToRow(r.Result[0]))
 	}
-	if len(r.Result) > 0 {
+	if len(r.Result) > 1 {
 		for _, row := range r.Result[1:] {
 			t.AppendRow(convertToRow(row))
 		}
@@ -375,7 +426,45 @@ func formatResult(r models.QueryResponse, out io.Writer, fancy bool) {
 	} else {
 		t.Style().Options.DrawBorder = false
 	}
-	t.Render()
+	return t.Render()
+}
+
+func formatExpanded(r models.QueryResponse, out io.Writer, fancy bool) {
+	if len(r.Result) < 2 {
+		return
+	}
+	headers := r.Result[0]
+
+	maxHeaderLen := 0
+	for _, h := range headers {
+		if len(h) > maxHeaderLen {
+			maxHeaderLen = len(h)
+		}
+	}
+
+	for i, row := range r.Result[1:] {
+		label := fmt.Sprintf("-[ RECORD %d ]", i+1)
+		padding := 40 - len(label)
+		if padding < 3 {
+			padding = 3
+		}
+		fmt.Fprintf(out, "%s%s\n", label, strings.Repeat("-", padding))
+
+		for j, val := range row {
+			header := ""
+			if j < len(headers) {
+				header = headers[j]
+			}
+			if fancy {
+				fmt.Fprintf(out, "\033[1;36m%-*s\033[0m | %s\n", maxHeaderLen, header, val)
+			} else {
+				fmt.Fprintf(out, "%-*s | %s\n", maxHeaderLen, header, val)
+			}
+		}
+		if i < len(r.Result)-2 {
+			fmt.Fprintln(out)
+		}
+	}
 }
 
 func convertToRow(raw []string) (r table.Row) {
