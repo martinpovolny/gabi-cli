@@ -305,8 +305,12 @@ func printHelp() {
   \d              list tables, views, and sequences
   \d <table>      describe table (columns, indexes, references)
   \stats          show all database statistics
-  \stats <N>      show statistic N (1=DB sizes, 2=table sizes,
-                  3=running queries, 4=index usage, 5=unused indexes)
+  \stats <name>   show specific stats (can combine multiple):
+                    dbsize     - database sizes
+                    tables     - table sizes
+                    queries    - running queries
+                    indexusage - index usage rates
+                    unused     - unused indexes
   \e              open last query in $EDITOR
   \x              toggle expanded display mode
   \h, \help       show this help
@@ -356,14 +360,15 @@ WHERE confrelid = '%s'::regclass AND contype = 'f' AND conparentid = 0
 ORDER BY conname;`
 
 var statQueries = []struct {
+	name  string
 	label string
 	sql   string
 }{
-	{"Database sizes", `SELECT datname AS "DB Name", pg_size_pretty(pg_database_size(datname)) AS "DB Size" FROM pg_database ORDER BY pg_database_size(datname) DESC;`},
-	{"Table sizes", `WITH RECURSIVE pg_inherit(inhrelid, inhparent) AS (SELECT inhrelid, inhparent FROM pg_inherits UNION SELECT child.inhrelid, parent.inhparent FROM pg_inherit child, pg_inherits parent WHERE child.inhparent = parent.inhrelid), pg_inherit_short AS (SELECT * FROM pg_inherit WHERE inhparent NOT IN (SELECT inhrelid FROM pg_inherit)) SELECT table_schema AS "Schema", table_name AS "Table", row_estimate AS "Row Estimate", pg_size_pretty(total_bytes) AS "Total", pg_size_pretty(index_bytes) AS "Index", pg_size_pretty(toast_bytes) AS "Toast", pg_size_pretty(table_bytes) AS "Table" FROM (SELECT *, total_bytes-index_bytes-coalesce(toast_bytes,0) AS table_bytes FROM (SELECT c.oid, nspname AS table_schema, relname AS table_name, sum(c.reltuples) OVER (PARTITION BY parent) AS row_estimate, sum(pg_total_relation_size(c.oid)) OVER (PARTITION BY parent) AS total_bytes, sum(pg_indexes_size(c.oid)) OVER (PARTITION BY parent) AS index_bytes, sum(pg_total_relation_size(reltoastrelid)) OVER (PARTITION BY parent) AS toast_bytes, parent FROM (SELECT pg_class.oid, reltuples, relname, relnamespace, pg_class.reltoastrelid, coalesce(inhparent, pg_class.oid) parent FROM pg_class LEFT JOIN pg_inherit_short ON inhrelid = oid WHERE relkind IN ('r', 'p')) c LEFT JOIN pg_namespace n ON n.oid = c.relnamespace) a WHERE oid = parent AND table_schema <> 'pg_catalog' AND table_schema <> 'information_schema') a ORDER BY total_bytes DESC;`},
-	{"Running queries", `SELECT pid AS "PID", age(clock_timestamp(), query_start) AS "Age", usename AS "Username", query AS "Query" FROM pg_stat_activity WHERE query <> '<IDLE>' AND query NOT ILIKE '%pg_stat_activity%' ORDER BY query_start DESC;`},
-	{"Index usage rates", `SELECT relname AS "Table name", 100 * idx_scan / (seq_scan + idx_scan) AS "Index Usage (%)", n_live_tup AS "Rows in Table" FROM pg_stat_user_tables WHERE seq_scan + idx_scan > 0 ORDER BY n_live_tup DESC;`},
-	{"Unused indexes", `SELECT relname AS "Table Name", indexrelname AS "Index Name", idx_scan AS "Index Scans", idx_tup_read AS "Index Entries Returned", idx_tup_fetch AS "Live Rows Fetched", pg_size_pretty(pg_relation_size(indexrelname::regclass)) AS "Index Size" FROM pg_stat_all_indexes WHERE schemaname = 'public' AND idx_scan = 0 AND idx_tup_read = 0 AND idx_tup_fetch = 0 ORDER BY pg_relation_size(indexrelname::regclass) DESC;`},
+	{"dbsize", "Database sizes", `SELECT datname AS "DB Name", pg_size_pretty(pg_database_size(datname)) AS "DB Size" FROM pg_database ORDER BY pg_database_size(datname) DESC;`},
+	{"tables", "Table sizes", `WITH RECURSIVE pg_inherit(inhrelid, inhparent) AS (SELECT inhrelid, inhparent FROM pg_inherits UNION SELECT child.inhrelid, parent.inhparent FROM pg_inherit child, pg_inherits parent WHERE child.inhparent = parent.inhrelid), pg_inherit_short AS (SELECT * FROM pg_inherit WHERE inhparent NOT IN (SELECT inhrelid FROM pg_inherit)) SELECT table_schema AS "Schema", table_name AS "Table", row_estimate AS "Row Estimate", pg_size_pretty(total_bytes) AS "Total", pg_size_pretty(index_bytes) AS "Index", pg_size_pretty(toast_bytes) AS "Toast", pg_size_pretty(table_bytes) AS "Table" FROM (SELECT *, total_bytes-index_bytes-coalesce(toast_bytes,0) AS table_bytes FROM (SELECT c.oid, nspname AS table_schema, relname AS table_name, sum(c.reltuples) OVER (PARTITION BY parent) AS row_estimate, sum(pg_total_relation_size(c.oid)) OVER (PARTITION BY parent) AS total_bytes, sum(pg_indexes_size(c.oid)) OVER (PARTITION BY parent) AS index_bytes, sum(pg_total_relation_size(reltoastrelid)) OVER (PARTITION BY parent) AS toast_bytes, parent FROM (SELECT pg_class.oid, reltuples, relname, relnamespace, pg_class.reltoastrelid, coalesce(inhparent, pg_class.oid) parent FROM pg_class LEFT JOIN pg_inherit_short ON inhrelid = oid WHERE relkind IN ('r', 'p')) c LEFT JOIN pg_namespace n ON n.oid = c.relnamespace) a WHERE oid = parent AND table_schema <> 'pg_catalog' AND table_schema <> 'information_schema') a ORDER BY total_bytes DESC;`},
+	{"queries", "Running queries", `SELECT pid AS "PID", age(clock_timestamp(), query_start) AS "Age", usename AS "Username", query AS "Query" FROM pg_stat_activity WHERE query <> '<IDLE>' AND query NOT ILIKE '%pg_stat_activity%' ORDER BY query_start DESC;`},
+	{"indexusage", "Index usage rates", `SELECT relname AS "Table name", 100 * idx_scan / (seq_scan + idx_scan) AS "Index Usage (%)", n_live_tup AS "Rows in Table" FROM pg_stat_user_tables WHERE seq_scan + idx_scan > 0 ORDER BY n_live_tup DESC;`},
+	{"unused", "Unused indexes", `SELECT relname AS "Table Name", indexrelname AS "Index Name", idx_scan AS "Index Scans", idx_tup_read AS "Index Entries Returned", idx_tup_fetch AS "Live Rows Fetched", pg_size_pretty(pg_relation_size(indexrelname::regclass)) AS "Index Size" FROM pg_stat_all_indexes WHERE schemaname = 'public' AND idx_scan = 0 AND idx_tup_read = 0 AND idx_tup_fetch = 0 ORDER BY pg_relation_size(indexrelname::regclass) DESC;`},
 }
 
 func runBuiltinQuery(gabiUrl, bearerToken, sql string, out io.Writer, fancy bool, displayMode string) {
@@ -395,15 +400,25 @@ func describeTable(gabiUrl, bearerToken, tableName string, out io.Writer, fancy 
 func runStats(gabiUrl, bearerToken, cmd string, out io.Writer, fancy bool, displayMode string) {
 	fields := strings.Fields(cmd)
 	if len(fields) > 1 {
-		n := 0
-		fmt.Sscanf(fields[1], "%d", &n)
-		if n < 1 || n > len(statQueries) {
-			fmt.Fprintf(os.Stderr, "Error: \\stats accepts 1-%d\n", len(statQueries))
-			return
+		for _, arg := range fields[1:] {
+			found := false
+			for _, sq := range statQueries {
+				if sq.name == arg {
+					fmt.Fprintf(out, "%s:\n", sq.label)
+					runBuiltinQuery(gabiUrl, bearerToken, sq.sql, out, fancy, displayMode)
+					fmt.Fprintln(out)
+					found = true
+					break
+				}
+			}
+			if !found {
+				names := make([]string, len(statQueries))
+				for i, sq := range statQueries {
+					names[i] = sq.name
+				}
+				fmt.Fprintf(os.Stderr, "Unknown stat: %s (available: %s)\n", arg, strings.Join(names, ", "))
+			}
 		}
-		sq := statQueries[n-1]
-		fmt.Fprintf(out, "%s:\n", sq.label)
-		runBuiltinQuery(gabiUrl, bearerToken, sq.sql, out, fancy, displayMode)
 		return
 	}
 	for _, sq := range statQueries {
