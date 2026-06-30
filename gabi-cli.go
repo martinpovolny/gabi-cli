@@ -149,6 +149,7 @@ func main() {
 }
 
 const queryDelimiter = "\n\x00\n"
+const maxHistorySize = 500
 
 type QueryHistory struct {
 	prompt.History
@@ -178,6 +179,9 @@ func NewQueryHistory(path string) *QueryHistory {
 
 func (qh *QueryHistory) AddQuery(q string) {
 	qh.queries = append(qh.queries, q)
+	if len(qh.queries) > maxHistorySize {
+		qh.queries = qh.queries[len(qh.queries)-maxHistorySize:]
+	}
 	qh.History.Add(q)
 	qh.save()
 }
