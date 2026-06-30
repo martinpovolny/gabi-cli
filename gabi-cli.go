@@ -158,6 +158,19 @@ func main() {
 			}
 			return
 		}
+		if trimmed == `\d` {
+			runBuiltinQuery(gabiUrl, bearerToken, sqlListSchema, os.Stdout, *fancy, displayMode)
+			return
+		}
+		if strings.HasPrefix(trimmed, `\d `) {
+			tableName := strings.TrimSpace(trimmed[3:])
+			describeTable(gabiUrl, bearerToken, tableName, os.Stdout, *fancy, displayMode)
+			return
+		}
+		if trimmed == `\stats` || strings.HasPrefix(trimmed, `\stats `) {
+			runStats(gabiUrl, bearerToken, trimmed, os.Stdout, *fancy, displayMode)
+			return
+		}
 		runQuery(gabiUrl, bearerToken, input, &query, qh, *fancy, displayMode)
 	}, opts...)
 	p.Run()
@@ -267,6 +280,104 @@ func openEditor(content string) (string, error) {
 		return "", err
 	}
 	return strings.TrimRight(string(result), "\n"), nil
+}
+
+const sqlListSchema = `SELECT n.nspname AS schema, c.relname AS name,
+  CASE c.relkind WHEN 'r' THEN 'table' WHEN 'v' THEN 'view'
+    WHEN 'm' THEN 'materialized view' WHEN 'S' THEN 'sequence'
+    WHEN 'f' THEN 'foreign table' WHEN 'p' THEN 'partitioned table'
+  END AS type,
+  pg_catalog.pg_get_userbyid(c.relowner) AS owner
+FROM pg_catalog.pg_class c
+LEFT JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+WHERE c.relkind IN ('r','p','v','m','S','f')
+  AND n.nspname <> 'pg_catalog'
+  AND n.nspname <> 'information_schema'
+  AND n.nspname !~ '^pg_toast'
+  AND pg_catalog.pg_table_is_visible(c.oid)
+ORDER BY 1, 2;`
+
+const sqlDescribeColumns = `SELECT a.attname AS column,
+  pg_catalog.format_type(a.atttypid, a.atttypmod) AS type,
+  CASE WHEN a.attnotnull THEN 'not null' ELSE '' END AS nullable,
+  (SELECT pg_catalog.pg_get_expr(d.adbin, d.adrelid, true)
+   FROM pg_catalog.pg_attrdef d
+   WHERE d.adrelid = a.attrelid AND d.adnum = a.attnum AND a.atthasdef) AS default
+FROM pg_catalog.pg_attribute a
+WHERE a.attrelid = '%s'::regclass AND a.attnum > 0 AND NOT a.attisdropped
+ORDER BY a.attnum;`
+
+const sqlDescribeIndexes = `SELECT c2.relname AS name,
+  pg_catalog.pg_get_constraintdef(con.oid, true) AS constraint,
+  pg_catalog.pg_get_indexdef(i.indexrelid, 0, true) AS definition
+FROM pg_catalog.pg_class c, pg_catalog.pg_class c2, pg_catalog.pg_index i
+LEFT JOIN pg_catalog.pg_constraint con
+  ON (conrelid = i.indrelid AND conindid = i.indexrelid AND contype IN ('p','u','x'))
+WHERE c.oid = '%s'::regclass AND c.oid = i.indrelid AND i.indexrelid = c2.oid
+ORDER BY i.indisprimary DESC, c2.relname;`
+
+const sqlDescribeReferences = `SELECT conname AS name, conrelid::regclass AS table,
+  pg_catalog.pg_get_constraintdef(oid, true) AS definition
+FROM pg_catalog.pg_constraint
+WHERE confrelid = '%s'::regclass AND contype = 'f' AND conparentid = 0
+ORDER BY conname;`
+
+var statQueries = []struct {
+	label string
+	sql   string
+}{
+	{"Database sizes", `SELECT datname AS "DB Name", pg_size_pretty(pg_database_size(datname)) AS "DB Size" FROM pg_database ORDER BY pg_database_size(datname) DESC;`},
+	{"Table sizes", `WITH RECURSIVE pg_inherit(inhrelid, inhparent) AS (SELECT inhrelid, inhparent FROM pg_inherits UNION SELECT child.inhrelid, parent.inhparent FROM pg_inherit child, pg_inherits parent WHERE child.inhparent = parent.inhrelid), pg_inherit_short AS (SELECT * FROM pg_inherit WHERE inhparent NOT IN (SELECT inhrelid FROM pg_inherit)) SELECT table_schema AS "Schema", table_name AS "Table", row_estimate AS "Row Estimate", pg_size_pretty(total_bytes) AS "Total", pg_size_pretty(index_bytes) AS "Index", pg_size_pretty(toast_bytes) AS "Toast", pg_size_pretty(table_bytes) AS "Table" FROM (SELECT *, total_bytes-index_bytes-coalesce(toast_bytes,0) AS table_bytes FROM (SELECT c.oid, nspname AS table_schema, relname AS table_name, sum(c.reltuples) OVER (PARTITION BY parent) AS row_estimate, sum(pg_total_relation_size(c.oid)) OVER (PARTITION BY parent) AS total_bytes, sum(pg_indexes_size(c.oid)) OVER (PARTITION BY parent) AS index_bytes, sum(pg_total_relation_size(reltoastrelid)) OVER (PARTITION BY parent) AS toast_bytes, parent FROM (SELECT pg_class.oid, reltuples, relname, relnamespace, pg_class.reltoastrelid, coalesce(inhparent, pg_class.oid) parent FROM pg_class LEFT JOIN pg_inherit_short ON inhrelid = oid WHERE relkind IN ('r', 'p')) c LEFT JOIN pg_namespace n ON n.oid = c.relnamespace) a WHERE oid = parent AND table_schema <> 'pg_catalog' AND table_schema <> 'information_schema') a ORDER BY total_bytes DESC;`},
+	{"Running queries", `SELECT pid AS "PID", age(clock_timestamp(), query_start) AS "Age", usename AS "Username", query AS "Query" FROM pg_stat_activity WHERE query <> '<IDLE>' AND query NOT ILIKE '%pg_stat_activity%' ORDER BY query_start DESC;`},
+	{"Index usage rates", `SELECT relname AS "Table name", 100 * idx_scan / (seq_scan + idx_scan) AS "Index Usage (%)", n_live_tup AS "Rows in Table" FROM pg_stat_user_tables WHERE seq_scan + idx_scan > 0 ORDER BY n_live_tup DESC;`},
+	{"Unused indexes", `SELECT relname AS "Table Name", indexrelname AS "Index Name", idx_scan AS "Index Scans", idx_tup_read AS "Index Entries Returned", idx_tup_fetch AS "Live Rows Fetched", pg_size_pretty(pg_relation_size(indexrelname::regclass)) AS "Index Size" FROM pg_stat_all_indexes WHERE schemaname = 'public' AND idx_scan = 0 AND idx_tup_read = 0 AND idx_tup_fetch = 0 ORDER BY pg_relation_size(indexrelname::regclass) DESC;`},
+}
+
+func runBuiltinQuery(gabiUrl, bearerToken, sql string, out io.Writer, fancy bool, displayMode string) {
+	result, err := queryGabi(gabiUrl, sql, bearerToken)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %s\n", err)
+		return
+	}
+	if result.Error != "" {
+		fmt.Fprintf(os.Stderr, "Error: %s\n", result.Error)
+		return
+	}
+	formatResult(result, out, fancy, displayMode)
+}
+
+func describeTable(gabiUrl, bearerToken, tableName string, out io.Writer, fancy bool, displayMode string) {
+	fmt.Fprintf(out, "Columns:\n")
+	runBuiltinQuery(gabiUrl, bearerToken, fmt.Sprintf(sqlDescribeColumns, tableName), out, fancy, displayMode)
+	fmt.Fprintln(out)
+
+	fmt.Fprintf(out, "Indexes:\n")
+	runBuiltinQuery(gabiUrl, bearerToken, fmt.Sprintf(sqlDescribeIndexes, tableName), out, fancy, displayMode)
+	fmt.Fprintln(out)
+
+	fmt.Fprintf(out, "Referenced by:\n")
+	runBuiltinQuery(gabiUrl, bearerToken, fmt.Sprintf(sqlDescribeReferences, tableName), out, fancy, displayMode)
+}
+
+func runStats(gabiUrl, bearerToken, cmd string, out io.Writer, fancy bool, displayMode string) {
+	fields := strings.Fields(cmd)
+	if len(fields) > 1 {
+		n := 0
+		fmt.Sscanf(fields[1], "%d", &n)
+		if n < 1 || n > len(statQueries) {
+			fmt.Fprintf(os.Stderr, "Error: \\stats accepts 1-%d\n", len(statQueries))
+			return
+		}
+		sq := statQueries[n-1]
+		fmt.Fprintf(out, "%s:\n", sq.label)
+		runBuiltinQuery(gabiUrl, bearerToken, sq.sql, out, fancy, displayMode)
+		return
+	}
+	for _, sq := range statQueries {
+		fmt.Fprintf(out, "%s:\n", sq.label)
+		runBuiltinQuery(gabiUrl, bearerToken, sq.sql, out, fancy, displayMode)
+		fmt.Fprintln(out)
+	}
 }
 
 func runQuery(gabiUrl, bearerToken, input string, query *string, qh *QueryHistory, fancy bool, displayMode string) {
