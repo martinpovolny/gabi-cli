@@ -363,7 +363,7 @@ var statQueries = []struct {
 	sql   string
 }{
 	{"queries", "Running queries", `SELECT pid AS "PID", age(clock_timestamp(), query_start) AS "Age", usename AS "Username", query AS "Query" FROM pg_stat_activity WHERE query <> '<IDLE>' AND query NOT ILIKE '%pg_stat_activity%' ORDER BY query_start DESC;`},
-	{"indexusage", "Index usage rates", `SELECT relname AS "Table name", round(100.0 * idx_scan / (seq_scan + idx_scan), 1) AS "Index Usage (%)", n_live_tup AS "Rows in Table" FROM pg_stat_user_tables WHERE seq_scan + idx_scan > 0 ORDER BY n_live_tup DESC;`},
+	{"indexusage", "Index usage rates", `SELECT relname AS "Table name", round(100.0 * idx_scan / (seq_scan + idx_scan), 1) AS "Index Usage (%)", (SELECT reltuples::bigint FROM pg_class c WHERE c.relname = s.relname LIMIT 1) AS "Row Estimate" FROM pg_stat_user_tables s WHERE seq_scan + idx_scan > 0 ORDER BY n_live_tup DESC;`},
 	{"unused", "Unused indexes", `SELECT relname AS "Table Name", indexrelname AS "Index Name", idx_scan AS "Index Scans", idx_tup_read AS "Index Entries Returned", idx_tup_fetch AS "Live Rows Fetched", pg_size_pretty(pg_relation_size(indexrelname::regclass)) AS "Index Size" FROM pg_stat_all_indexes WHERE schemaname = 'public' AND idx_scan = 0 AND idx_tup_read = 0 AND idx_tup_fetch = 0 ORDER BY pg_relation_size(indexrelname::regclass) DESC;`},
 }
 
