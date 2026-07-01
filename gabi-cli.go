@@ -77,13 +77,16 @@ func main() {
 	gabiUrl := gabiUrlFromRoute(gabiRoute)
 	log.Printf("Using Gabi %s", gabiUrl)
 
-	historyFile := ""
-	if home := homedir.HomeDir(); home != "" {
-		historyFile = filepath.Join(home, ".gabi_history")
+	dataDir := ""
+	if d := os.Getenv("XDG_DATA_HOME"); d != "" {
+		dataDir = filepath.Join(d, "gabi-cli")
+	} else if home := homedir.HomeDir(); home != "" {
+		dataDir = filepath.Join(home, ".local", "share", "gabi-cli")
 	}
 	var qh *QueryHistory
-	if historyFile != "" {
-		qh = NewQueryHistory(historyFile)
+	if dataDir != "" {
+		os.MkdirAll(dataDir, 0700)
+		qh = NewQueryHistory(filepath.Join(dataDir, "history"))
 	}
 
 	displayMode := *display
