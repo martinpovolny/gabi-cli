@@ -24,6 +24,10 @@ Usage of gabi-cli:
   -n string
         Namespace (defaults to current context)
   -q    Suppress logging messages
+  -fancy
+        Use rounded table style with colored header
+  -display string
+        Display mode: auto, table, or expanded (default "auto")
 ```
 
 If your system is correctly configured (logged into Openshift and a GABI compliant project selected), then running `gabi-cli` should report the namespace, cluster, and GABI url you have accessed and drop you into a database query prompt.
@@ -35,10 +39,18 @@ Some examples:
 `SELECT COUNT(*) FROM <table>;` -> Count the number of rows in table \<table\>  
 `SELECT column_name, data_type FROM information_schema.columns WHERE table_name = '<table>';` -> List column names and types for \<table\> in a Postgres database.
 
-**NOTE:** Only query strings may be used. PSQL commands, such as `\d` and `\gdesc` will not work.
+### Interactive commands
+
+| Command | Description |
+|---------|-------------|
+| `\e` | Open last query in `$VISUAL`/`$EDITOR`/`vi` |
+| `\x` | Toggle expanded display mode |
+| `Ctrl+O` | Open current buffer (or last query) in editor |
+| `Ctrl+L` | Clear the screen |
+| `Ctrl+D` | Exit |
 
 You may scroll through the command history with the up and down arrow keys.
 
-`Ctrl + L` will clear the screen.
+### History
 
-`Ctrl + D` will quit the prompt and exit Gabi CLI.
+Query history is persisted to `~/.local/share/gabi-cli/history` (or `$XDG_DATA_HOME/gabi-cli/history` if set).
