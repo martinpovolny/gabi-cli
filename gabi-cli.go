@@ -27,6 +27,7 @@ import (
 
 	"github.com/elk-language/go-prompt"
 	istrings "github.com/elk-language/go-prompt/strings"
+	"github.com/google/shlex"
 	"github.com/jedib0t/go-pretty/v6/table"
 	"github.com/jedib0t/go-pretty/v6/text"
 	"golang.org/x/term"
@@ -249,7 +250,12 @@ func openEditor(content string) (string, error) {
 	}
 
 	editor := getEditor()
-	cmd := exec.Command("sh", "-c", editor+" \"$1\"", "--", tmpPath)
+	args, err := shlex.Split(editor)
+	if err != nil || len(args) == 0 {
+		return "", fmt.Errorf("failed to parse editor command: %s", editor)
+	}
+	args = append(args, tmpPath)
+	cmd := exec.Command(args[0], args[1:]...)
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
