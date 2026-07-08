@@ -380,7 +380,12 @@ func pageOutput(content string) {
 		return
 	}
 	pager := getPager()
-	cmd := exec.Command("sh", "-c", pager)
+	args, err := shlex.Split(pager)
+	if err != nil || len(args) == 0 {
+		fmt.Print(content)
+		return
+	}
+	cmd := exec.Command(args[0], args[1:]...)
 	cmd.Stdin = strings.NewReader(content)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
