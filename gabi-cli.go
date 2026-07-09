@@ -374,8 +374,18 @@ func pageOutput(content string) {
 	if content == "" {
 		return
 	}
-	lines := strings.Count(content, "\n")
-	if lines < getTerminalHeight() {
+	termWidth := getTerminalWidth()
+	visualLines := 0
+	for _, line := range strings.Split(content, "\n") {
+		stripped := text.StripEscape(line)
+		w := len([]rune(stripped))
+		if w <= termWidth {
+			visualLines++
+		} else {
+			visualLines += (w + termWidth - 1) / termWidth
+		}
+	}
+	if visualLines < getTerminalHeight() {
 		fmt.Print(content)
 		return
 	}
