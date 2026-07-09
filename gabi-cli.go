@@ -95,9 +95,7 @@ func main() {
 	var query string
 	if len(flag.Args()) > 0 {
 		query = strings.Join(flag.Args(), " ")
-		var buf bytes.Buffer
-		runQuery(gabiUrl, bearerToken, "", &query, qh, *fancy, displayMode, &buf)
-		pageOutput(buf.String())
+		runQuery(gabiUrl, bearerToken, "", &query, qh, *fancy, displayMode, os.Stdout)
 		return
 	}
 
@@ -362,10 +360,12 @@ func getPager() string {
 	return "less -R"
 }
 
+const defaultTerminalHeight = 24
+
 func getTerminalHeight() int {
 	_, h, err := term.GetSize(int(os.Stdin.Fd()))
 	if err != nil || h <= 0 {
-		return 24
+		return defaultTerminalHeight
 	}
 	return h
 }
@@ -394,22 +394,25 @@ func pageOutput(content string) {
 	}
 }
 
-func runBuiltinQuery(gabiUrl, bearerToken, sql string, out io.Writer, fancy bool, displayMode string) {
+func runBuiltinQuery(gabiUrl, bearerToken, sql string, out io.Writer, fancy bool, displayMode string) error {
 	result, err := queryGabi(gabiUrl, sql, bearerToken)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %s\n", err)
-		return
+		return err
 	}
 	if result.Error != "" {
 		fmt.Fprintf(os.Stderr, "Error: %s\n", result.Error)
-		return
+		return fmt.Errorf("%s", result.Error)
 	}
 	formatResult(result, out, fancy, displayMode)
+	return nil
 }
 
 func describeTable(gabiUrl, bearerToken, tableName string, out io.Writer, fancy bool, displayMode string) {
 	fmt.Fprintf(out, "Columns:\n")
-	runBuiltinQuery(gabiUrl, bearerToken, fmt.Sprintf(sqlDescribeColumns, tableName), out, fancy, displayMode)
+	if err := runBuiltinQuery(gabiUrl, bearerToken, fmt.Sprintf(sqlDescribeColumns, tableName), out, fancy, displayMode); err != nil {
+		return
+	}
 	fmt.Fprintln(out)
 
 	fmt.Fprintf(out, "Indexes:\n")
